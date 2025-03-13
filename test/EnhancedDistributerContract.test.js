@@ -159,12 +159,19 @@ describe("EnhancedDistributerContract", function () {
 
   describe("Access Control", function () {
     it("Should prevent non-owners from calling restricted functions", async function () {
+      const amount = ethers.parseUnits("100", 18);
+      
+      // Non-owner should not be able to call restricted functions
       await expect(
-        enhancedDistributer.connect(addr1).addProxyIncome(ethers.parseUnits("100", 18))
-      ).to.be.revertedWith("Only owner can call this function");
+        enhancedDistributer.connect(addr1).addProxyIncome(amount)
+      ).to.be.revertedWith("Only operator or owner can call this function");
       
       await expect(
         enhancedDistributer.connect(addr1).pause()
+      ).to.be.revertedWith("Only owner can call this function");
+      
+      await expect(
+        enhancedDistributer.connect(addr1).setProxyAddress(addr2.address)
       ).to.be.revertedWith("Only owner can call this function");
     });
   });

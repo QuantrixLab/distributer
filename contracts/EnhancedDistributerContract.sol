@@ -24,6 +24,9 @@ contract EnhancedDistributerContract {
     address public usdtTokenAddress;
     address public tokenPool;
     
+    // 操作者地址，只有这个地址才能执行收入添加操作
+    address public operator;
+    
     // Role addresses
     address public b_proxy;
     address public b_a_role;
@@ -42,6 +45,30 @@ contract EnhancedDistributerContract {
     // Pause mechanism
     bool public paused;
     
+    // Income type enum for unified interface
+    enum IncomeType {
+        PROXY,      // Proxy income (100% to b_proxy)
+        STANDARD,   // Standard income (30% to b_a_role, 30% to b_b_role, 40% to b_c_role)
+        EXTRA,      // Extra income (70% to b_partner, 30% to b_reserved)
+        NATURAL,    // Natural income (100% to b_reserved)
+        BASE        // Base income (100% to b_base_fee)
+    }
+    
+    // Struct to return distribution details
+    struct DistributionResult {
+        uint256 totalAmount;
+        uint256 proxyAmount;
+        uint256 standardAmount;
+        uint256 extraAmount;
+        uint256 naturalAmount;
+        uint256 baseAmount;
+        bool proxyProcessed;
+        bool standardProcessed;
+        bool extraProcessed;
+        bool naturalProcessed;
+        bool baseProcessed;
+    }
+    
     // Events
     event RoleAddressUpdated(string indexed role, address oldAddress, address newAddress);
     event USDTAddressUpdated(address indexed oldAddress, address indexed newAddress);
@@ -58,9 +85,16 @@ contract EnhancedDistributerContract {
     event OwnershipTransferCompleted(address indexed previousOwner, address indexed newOwner);
     event ContractPaused(address indexed by);
     event ContractUnpaused(address indexed by);
+    event IncomeAdded(IncomeType indexed incomeType, uint256 amount);
+    event OperatorUpdated(address indexed oldOperator, address indexed newOperator);
     
     modifier onlyOwner() {
         require(msg.sender == owner, "Only owner can call this function");
+        _;
+    }
+    
+    modifier onlyOperator() {
+        require(msg.sender == operator || msg.sender == owner, "Only operator or owner can call this function");
         _;
     }
     
@@ -81,10 +115,23 @@ contract EnhancedDistributerContract {
         require(_tokenPool != address(0), "Token pool address cannot be zero");
         
         owner = msg.sender;
+        operator = msg.sender; // 初始化操作者为合约部署者
         usdtTokenAddress = _usdtTokenAddress;
         tokenPool = _tokenPool;
         _locked = false;
         paused = false;
+    }
+    
+    /**
+     * @dev Sets the operator address
+     * @param _operator The new operator address
+     */
+    function setOperator(address _operator) external onlyOwner {
+        require(_operator != address(0), "Operator address cannot be zero");
+        require(_operator != operator, "New operator must be different from current");
+        
+        emit OperatorUpdated(operator, _operator);
+        operator = _operator;
     }
     
     /**
@@ -217,8 +264,107 @@ contract EnhancedDistributerContract {
         require(usdt.transferFrom(tokenPool, address(this), amount), "Transfer from pool failed");
     }
     
-    // 4.1 Add proxy income
-    function addProxyIncome(uint256 amount) external whenNotPaused onlyOwner {
+    /**
+     * @dev Unified interface for adding income
+     * @param incomeType The type of income to add (PROXY, STANDARD, EXTRA, NATURAL, BASE)
+     * @param amount The amount of income to add
+     */
+    function addIncome(IncomeType incomeType, uint256 amount) external whenNotPaused onlyOperator {
+        require(amount > 0, "Amount must be greater than 0");
+        
+        if (incomeType == IncomeType.PROXY) {
+            _addProxyIncome(amount);
+        } else if (incomeType == IncomeType.STANDARD) {
+            _addStandardIncome(amount);
+        } else if (incomeType == IncomeType.EXTRA) {
+            _addExtraIncome(amount);
+        } else if (incomeType == IncomeType.NATURAL) {
+            _addNaturalIncome(amount);
+        } else if (incomeType == IncomeType.BASE) {
+            _addBaseIncome(amount);
+        } else {
+            revert("Invalid income type");
+        }
+        
+        emit IncomeAdded(incomeType, amount);
+    }
+    
+    /**
+     * @dev Batch interface for adding multiple types of income at once
+     * @param proxyAmount Amount for proxy income
+     * @param standardAmount Amount for standard income
+     * @param extraAmount Amount for extra income
+     * @param naturalAmount Amount for natural income
+     * @param baseAmount Amount for base income
+     * @return result Struct containing details about the distribution
+     */
+    function addMultipleIncomes(
+        uint256 proxyAmount,
+        uint256 standardAmount,
+        uint256 extraAmount,
+        uint256 naturalAmount,
+        uint256 baseAmount
+    ) external whenNotPaused onlyOperator returns (DistributionResult memory result) {
+        // Check if at least one amount is greater than zero
+        require(
+            proxyAmount > 0 || standardAmount > 0 || extraAmount > 0 || 
+            naturalAmount > 0 || baseAmount > 0,
+            "At least one amount must be greater than 0"
+        );
+        
+        // Initialize result struct
+        result.totalAmount = 0;
+        result.proxyAmount = proxyAmount;
+        result.standardAmount = standardAmount;
+        result.extraAmount = extraAmount;
+        result.naturalAmount = naturalAmount;
+        result.baseAmount = baseAmount;
+        
+        // Add proxy income if amount > 0
+        if (proxyAmount > 0) {
+            _addProxyIncome(proxyAmount);
+            emit IncomeAdded(IncomeType.PROXY, proxyAmount);
+            result.totalAmount += proxyAmount;
+            result.proxyProcessed = true;
+        }
+        
+        // Add standard income if amount > 0
+        if (standardAmount > 0) {
+            _addStandardIncome(standardAmount);
+            emit IncomeAdded(IncomeType.STANDARD, standardAmount);
+            result.totalAmount += standardAmount;
+            result.standardProcessed = true;
+        }
+        
+        // Add extra income if amount > 0
+        if (extraAmount > 0) {
+            _addExtraIncome(extraAmount);
+            emit IncomeAdded(IncomeType.EXTRA, extraAmount);
+            result.totalAmount += extraAmount;
+            result.extraProcessed = true;
+        }
+        
+        // Add natural income if amount > 0
+        if (naturalAmount > 0) {
+            _addNaturalIncome(naturalAmount);
+            emit IncomeAdded(IncomeType.NATURAL, naturalAmount);
+            result.totalAmount += naturalAmount;
+            result.naturalProcessed = true;
+        }
+        
+        // Add base income if amount > 0
+        if (baseAmount > 0) {
+            _addBaseIncome(baseAmount);
+            emit IncomeAdded(IncomeType.BASE, baseAmount);
+            result.totalAmount += baseAmount;
+            result.baseProcessed = true;
+        }
+        
+        return result;
+    }
+    
+    // 4.1 Add proxy income (internal version)
+    function _addProxyIncome(uint256 amount) internal {
         transferFromPool(amount);
         
         distributeOrRetain(b_proxy, amount, "b_proxy");
@@ -226,8 +372,13 @@ contract EnhancedDistributerContract {
         emit ProxyIncomeAdded(amount);
     }
     
-    // 4.2 Add standard income
-    function addStandardIncome(uint256 amount) external whenNotPaused onlyOwner {
+    // 4.1 Add proxy income (external version for backward compatibility)
+    function addProxyIncome(uint256 amount) external whenNotPaused onlyOperator {
+        _addProxyIncome(amount);
+    }
+    
+    // 4.2 Add standard income (internal version)
+    function _addStandardIncome(uint256 amount) internal {
         transferFromPool(amount);
         
         uint256 aAmount = (amount * 30) / 100;
@@ -244,8 +395,13 @@ contract EnhancedDistributerContract {
         emit StandardIncomeAdded(amount, aAmount, bAmount, cAmount);
     }
     
-    // 4.3 Add extra income
-    function addExtraIncome(uint256 amount) external whenNotPaused onlyOwner {
+    // 4.2 Add standard income (external version for backward compatibility)
+    function addStandardIncome(uint256 amount) external whenNotPaused onlyOperator {
+        _addStandardIncome(amount);
+    }
+    
+    // 4.3 Add extra income (internal version)
+    function _addExtraIncome(uint256 amount) internal {
         transferFromPool(amount);
         
         uint256 partnerAmount = (amount * 70) / 100;
@@ -260,8 +416,13 @@ contract EnhancedDistributerContract {
         emit ExtraIncomeAdded(amount, partnerAmount, reservedAmount);
     }
     
-    // 4.4 Add natural income
-    function addNaturalIncome(uint256 amount) external whenNotPaused onlyOwner {
+    // 4.3 Add extra income (external version for backward compatibility)
+    function addExtraIncome(uint256 amount) external whenNotPaused onlyOperator {
+        _addExtraIncome(amount);
+    }
+    
+    // 4.4 Add natural income (internal version)
+    function _addNaturalIncome(uint256 amount) internal {
         transferFromPool(amount);
         
         distributeOrRetain(b_reserved, amount, "b_reserved");
@@ -269,13 +430,23 @@ contract EnhancedDistributerContract {
         emit NaturalIncomeAdded(amount);
     }
     
-    // 4.5 Add base income
-    function addBaseIncome(uint256 amount) external whenNotPaused onlyOwner {
+    // 4.4 Add natural income (external version for backward compatibility)
+    function addNaturalIncome(uint256 amount) external whenNotPaused onlyOperator {
+        _addNaturalIncome(amount);
+    }
+    
+    // 4.5 Add base income (internal version)
+    function _addBaseIncome(uint256 amount) internal {
         transferFromPool(amount);
         
         distributeOrRetain(b_base_fee, amount, "b_base_fee");
         
         emit BaseIncomeAdded(amount);
+    }
+    
+    // 4.5 Add base income (external version for backward compatibility)
+    function addBaseIncome(uint256 amount) external whenNotPaused onlyOperator {
+        _addBaseIncome(amount);
     }
     
     // Withdraw USDT based on balance

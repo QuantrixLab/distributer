@@ -15,6 +15,7 @@
 
 - 为所有收入添加函数添加了`onlyOwner`修饰符，确保只有合约所有者可以调用这些函数
 - 实现了两步所有权转移过程，防止所有权意外转移到错误的地址
+- 添加了操作者角色，只有操作者和所有者可以执行收入添加操作
 
 ### 3. 暂停机制
 
@@ -39,6 +40,18 @@
 
 - 改进了百分比计算，使用减法而不是直接计算，防止因舍入误差导致的资金丢失
 
+### 8. 统一接口和批量收入分配
+
+- 添加了统一的收入添加接口，使用枚举类型区分不同收入类型
+- 实现了批量收入分配功能，允许在一次交易中处理多种类型的收入
+- 提供了详细的分配结果信息，包括每种收入类型的处理状态
+
+### 9. 操作者角色
+
+- 添加了操作者角色，只有操作者和所有者可以执行收入添加操作
+- 操作者地址只能由合约所有者设置
+- 提高了合约的灵活性和安全性，允许将日常操作委托给特定地址
+
 ## 测试
 
 项目包含全面的测试套件，验证所有安全增强功能：
@@ -51,6 +64,9 @@
 - 紧急恢复测试
 - 访问控制测试
 - 输入验证测试
+- 统一接口测试
+- 批量收入分配测试
+- 操作者角色测试
 
 ## 如何运行测试
 
@@ -102,10 +118,13 @@ npx hardhat test
   - 有效地址直接接收资金转账
   - 无效地址（零地址）的资金保留在 reserved 池中
 - 所有资金仅从代币池中转移
+- 统一接口和批量收入分配功能，简化客户端使用
+- 操作者角色，允许将日常操作委托给特定地址
 
 ## 合约结构
 
 - `DistributerContract.sol`：实现分配逻辑的主合约
+- `EnhancedDistributerContract.sol`：安全增强版合约，包含统一接口和批量收入分配功能
 - `MockERC20.sol`：用于测试目的的简单 ERC20 代币实现
 
 ## 设置和安装
@@ -157,6 +176,7 @@ npx hardhat test
    - 有效地址将直接接收资金
    - 无效地址（零地址）的资金将保留在 reserved 池中
 2. 确保代币池有足够的 USDT 并已批准合约花费它
+3. 可选：设置操作者地址，委托日常收入添加操作
 
 用户随后可以调用收入分配函数，这些函数将：
 1. 从代币池转移 USDT 到合约
@@ -177,6 +197,7 @@ npx hardhat test
 - `setPartnerAddress(address)`：设置 b_partner 地址
 - `setBaseFeeAddress(address)`：设置 b_base_fee 地址
 - `setReservedAddress(address)`：设置 b_reserved 地址
+- `setOperator(address)`：设置操作者地址，只有所有者可以调用
 
 ### 代币管理
 
@@ -185,11 +206,21 @@ npx hardhat test
 
 ### 收入分配
 
+#### 传统接口
 - `addProxyIncome(uint256)`：为代理角色添加收入
 - `addStandardIncome(uint256)`：添加分配给 a_role、b_role 和 c_role 的收入
 - `addExtraIncome(uint256)`：添加分配给 partner 和 reserved 的收入
 - `addNaturalIncome(uint256)`：为 reserved 角色添加收入
 - `addBaseIncome(uint256)`：为 base_fee 角色添加收入
+
+#### 统一接口
+- `addIncome(IncomeType, uint256)`：使用统一接口添加收入，根据收入类型调用相应的内部函数
+
+#### 批量收入分配
+- `addMultipleIncomes(uint256, uint256, uint256, uint256, uint256)`：在一次交易中处理多种类型的收入
+  - 参数分别为：proxyAmount, standardAmount, extraAmount, naturalAmount, baseAmount
+  - 如果某个金额为0，则跳过对应的收入类型
+  - 返回一个包含详细分配信息的结构体
 
 ### 余额管理
 
